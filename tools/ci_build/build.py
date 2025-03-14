@@ -35,7 +35,8 @@ sys.path.insert(0, os.path.join(REPO_DIR, "tools", "python"))
 import util.android as android  # noqa: E402
 from util import (  # noqa: E402
     generate_android_triplets,
-    generate_posix_triplets,
+    generate_linux_triplets,
+    generate_macos_triplets,
     generate_vcpkg_triplets_for_emscripten,
     generate_windows_triplets,
     get_logger,
@@ -432,6 +433,7 @@ def parse_arguments():
     platform_group = parser.add_mutually_exclusive_group()
     platform_group.add_argument("--ios", action="store_true", help="build for ios")
     platform_group.add_argument("--visionos", action="store_true", help="build for visionOS")
+    platform_group.add_argument("--tvos", action="store_true", help="build for tvOS")
     platform_group.add_argument(
         "--macos",
         choices=["MacOSX", "Catalyst"],
@@ -450,6 +452,11 @@ def parse_arguments():
         "--visionos_toolchain_file",
         default="",
         help="Path to visionos toolchain file, or cmake/onnxruntime_visionos.toolchain.cmake will be used",
+    )
+    parser.add_argument(
+        "--tvos_toolchain_file",
+        default="",
+        help="Path to tvos toolchain file, or cmake/onnxruntime_tvos.toolchain.cmake will be used",
     )
     parser.add_argument(
         "--xcode_code_signing_team_id", default="", help="The development team ID used for code signing in Xcode"
@@ -503,7 +510,7 @@ def parse_arguments():
     # WebAssembly build
     parser.add_argument("--build_wasm", action="store_true", help="Build for WebAssembly")
     parser.add_argument("--build_wasm_static_lib", action="store_true", help="Build for WebAssembly static library")
-    parser.add_argument("--emsdk_version", default="4.0.3", help="Specify version of emsdk")
+    parser.add_argument("--emsdk_version", default="4.0.4", help="Specify version of emsdk")
 
     parser.add_argument("--enable_wasm_simd", action="store_true", help="Enable WebAssembly SIMD")
     parser.add_argument("--enable_wasm_threads", action="store_true", help="Enable WebAssembly multi-threads support")
@@ -944,7 +951,7 @@ def use_dev_mode(args):
         return False
     if args.use_armnn:
         return False
-    if (args.ios or args.visionos) and is_macOS():
+    if (args.ios or args.visionos or args.tvos) and is_macOS():
         return False
     SYSTEM_COLLECTIONURI = os.getenv("SYSTEM_COLLECTIONURI")  # noqa: N806
     if SYSTEM_COLLECTIONURI and SYSTEM_COLLECTIONURI != "https://dev.azure.com/onnxruntime/":
@@ -1068,6 +1075,10 @@ def generate_vcpkg_install_options(build_dir, args):
     if "AGENT_TEMPDIRECTORY" in os.environ:
         temp_dir = os.environ["AGENT_TEMPDIRECTORY"]
         vcpkg_install_options.append(f"--x-buildtrees-root={temp_dir}")
+    elif "RUNNER_TEMP" in os.environ:
+        temp_dir = os.environ["RUNNER_TEMP"]
+        vcpkg_install_options.append(f"--x-buildtrees-root={temp_dir}")
+        vcpkg_install_options.append("--binarysource=clear\\;x-gha,readwrite")
 
     # Config asset cache
     if args.use_vcpkg_ms_internal_asset_cache:
@@ -1115,7 +1126,6 @@ def generate_build_tree(
     cmake_extra_args,
 ):
     log.info("Generating CMake build tree")
-
     cmake_dir = os.path.join(source_dir, "cmake")
     cmake_args = [cmake_path, cmake_dir]
     if not use_dev_mode(args):
@@ -1330,8 +1340,16 @@ def generate_build_tree(
             generate_android_triplets(build_dir, args.android_cpp_shared, args.android_api)
         elif is_windows():
             generate_windows_triplets(build_dir)
+        elif is_macOS():
+            osx_target = args.apple_deploy_target
+            if args.apple_deploy_target is None:
+                osx_target = os.environ.get("MACOSX_DEPLOYMENT_TARGET")
+            if osx_target is not None:
+                log.info(f"Setting VCPKG_OSX_DEPLOYMENT_TARGET to {osx_target}")
+            generate_macos_triplets(build_dir, osx_target)
         else:
-            generate_posix_triplets(build_dir)
+            # Linux, *BSD, AIX or other platforms
+            generate_linux_triplets(build_dir)
         add_default_definition(cmake_extra_defines, "CMAKE_TOOLCHAIN_FILE", str(vcpkg_toolchain_path))
 
         vcpkg_install_options = generate_vcpkg_install_options(build_dir, args)
@@ -1502,7 +1520,7 @@ def generate_build_tree(
         ]
 
     # VitisAI and OpenVINO providers currently only support full_protobuf option.
-    if args.use_full_protobuf or args.use_openvino or args.use_vitisai or args.gen_doc:
+    if args.use_full_protobuf or args.use_openvino or args.use_vitisai or args.gen_doc or args.enable_generic_interface:
         cmake_args += ["-Donnxruntime_USE_FULL_PROTOBUF=ON", "-DProtobuf_USE_STATIC_LIBS=ON"]
 
     if args.use_cuda and not is_windows():
@@ -1592,8 +1610,11 @@ def generate_build_tree(
             raise BuildError("WebNN is only available for WebAssembly build.")
         cmake_args += ["-Donnxruntime_USE_WEBNN=ON"]
 
-    if args.use_jsep and args.use_webgpu:
-        raise BuildError("JSEP (--use_jsep) and WebGPU (--use_webgpu) cannot be enabled at the same time.")
+    # TODO: currently we allows building with both --use_jsep and --use_webgpu in this working branch.
+    #       This situation is temporary. Eventually, those two flags will be mutually exclusive.
+    #
+    # if args.use_jsep and args.use_webgpu:
+    #     raise BuildError("JSEP (--use_jsep) and WebGPU (--use_webgpu) cannot be enabled at the same time.")
 
     if args.use_external_dawn and not args.use_webgpu:
         raise BuildError("External Dawn (--use_external_dawn) must be enabled with WebGPU (--use_webgpu).")
@@ -1606,12 +1627,12 @@ def generate_build_tree(
     if args.use_snpe:
         cmake_args += ["-Donnxruntime_USE_SNPE=ON"]
 
-    if args.macos or args.ios or args.visionos:
+    if args.macos or args.ios or args.visionos or args.tvos:
         # Note: Xcode CMake generator doesn't have a good support for Mac Catalyst yet.
         if args.macos == "Catalyst" and args.cmake_generator == "Xcode":
             raise BuildError("Xcode CMake generator ('--cmake_generator Xcode') doesn't support Mac Catalyst build.")
 
-        if (args.ios or args.visionos or args.macos == "MacOSX") and not args.cmake_generator == "Xcode":
+        if (args.ios or args.visionos or args.tvos or args.macos == "MacOSX") and not args.cmake_generator == "Xcode":
             raise BuildError(
                 "iOS/MacOS framework build requires use of the Xcode CMake generator ('--cmake_generator Xcode')."
             )
@@ -1670,6 +1691,16 @@ def generate_build_tree(
                     else "../cmake/onnxruntime_visionos.toolchain.cmake"
                 ),
                 "-Donnxruntime_ENABLE_CPUINFO=OFF",
+            ]
+        if args.tvos:
+            cmake_args += [
+                "-DCMAKE_SYSTEM_NAME=tvOS",
+                "-DCMAKE_TOOLCHAIN_FILE="
+                + (
+                    args.tvos_toolchain_file
+                    if args.tvos_toolchain_file
+                    else "../cmake/onnxruntime_tvos.toolchain.cmake"
+                ),
             ]
 
     if args.build_wasm:
@@ -1941,7 +1972,7 @@ def generate_build_tree(
             ]
         env = {}
         if args.use_vcpkg:
-            env["VCPKG_KEEP_ENV_VARS"] = "TRT_UPLOAD_AUTH_TOKEN"
+            env["VCPKG_KEEP_ENV_VARS"] = "TRT_UPLOAD_AUTH_TOKEN;EMSDK;EMSDK_NODE;EMSDK_PYTHON"
             if args.build_wasm:
                 env["EMSDK"] = emsdk_dir
 
@@ -2773,21 +2804,21 @@ def run_csharp_tests(
     csharp_source_dir = os.path.join(source_dir, "csharp")
 
     # define macros based on build args
-    macros = ""
+    macros = []
     if use_openvino:
-        macros += "USE_OPENVINO;"
+        macros.append("USE_OPENVINO")
     if use_tensorrt:
-        macros += "USE_TENSORRT;"
+        macros.append("USE_TENSORRT")
     if use_dnnl:
-        macros += "USE_DNNL;"
+        macros.append("USE_DNNL")
     if use_cuda:
-        macros += "USE_CUDA;"
+        macros.append("USE_CUDA")
     if enable_training_apis:
-        macros += "__TRAINING_ENABLED_NATIVE_BUILD__;__ENABLE_TRAINING_APIS__"
+        macros += ["__TRAINING_ENABLED_NATIVE_BUILD__", "__ENABLE_TRAINING_APIS__"]
 
     define_constants = ""
     if macros:
-        define_constants = '/p:DefineConstants="' + macros + '"'
+        define_constants = '/p:DefineConstants="' + ";".join(macros) + '"'
 
     # set build directory based on build_dir arg
     native_build_dir = os.path.normpath(os.path.join(source_dir, build_dir))
@@ -3133,7 +3164,7 @@ def main():
 
         if is_macOS():
             if (
-                not (args.ios or args.visionos)
+                not (args.ios or args.visionos or args.tvos)
                 and args.macos != "Catalyst"
                 and not args.android
                 and args.osx_arch == "arm64"

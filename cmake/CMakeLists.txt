@@ -1512,6 +1512,11 @@ if (onnxruntime_USE_OPENVINO)
 
 endif()
 
+if (onnxruntime_USE_OPENVINO_INTERFACE AND (NOT onnxruntime_USE_OPENVINO))
+    add_definitions(-DUSE_OPENVINO=1)
+    add_definitions(-DOPENVINO_CONFIG_NPU=1)
+endif()
+
 if (onnxruntime_USE_VITISAI)
     set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH};${CMAKE_CURRENT_LIST_DIR}")
 endif()
@@ -1807,8 +1812,8 @@ if (onnxruntime_USE_WINML)
 endif() # if (onnxruntime_USE_WINML)
 
 if (onnxruntime_BUILD_SHARED_LIB OR onnxruntime_BUILD_APPLE_FRAMEWORK)
-  if (onnxruntime_BUILD_APPLE_FRAMEWORK AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin|iOS|visionOS")
-    message(FATAL_ERROR "onnxruntime_BUILD_APPLE_FRAMEWORK can only be enabled for macOS or iOS or visionOS.")
+  if (onnxruntime_BUILD_APPLE_FRAMEWORK AND NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin|iOS|visionOS|tvOS")
+    message(FATAL_ERROR "onnxruntime_BUILD_APPLE_FRAMEWORK can only be enabled for macOS or iOS or visionOS or tvOS.")
   endif()
   list(APPEND ONNXRUNTIME_CMAKE_FILES onnxruntime)
 endif()
