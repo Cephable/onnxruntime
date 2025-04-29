@@ -191,6 +191,12 @@ OnnxRuntimeTestSession::OnnxRuntimeTestSession(Ort::Env& env, std::random_device
 #else
     ORT_THROW("TensorRT is not supported in this build\n");
 #endif
+  } else if (provider_name_ == onnxruntime::kNvTensorRTRTXExecutionProvider) {
+#ifdef USE_NV
+    session_options.AppendExecutionProvider("NvTensorRtRtx", provider_options);
+#else
+    ORT_THROW("NV TensorRT RTX is not supported in this build\n");
+#endif
   } else if (provider_name_ == onnxruntime::kQnnExecutionProvider) {
 #ifdef USE_QNN
 #ifdef _MSC_VER
@@ -421,12 +427,12 @@ select from 'TF8', 'TF16', 'UINT8', 'FLOAT', 'ITENSOR'. \n)");
               "Select from 'gpu', or 'npu' \n");
         }
       } else if (key == "performance_preference") {
-        std::set<std::string> ov_supported_values = {"default", "high_performance", "minimal_power"};
+        std::set<std::string> ov_supported_values = {"default", "high_performance", "minimum_power"};
         if (ov_supported_values.find(value) != ov_supported_values.end()) {
         } else {
           ORT_THROW(
               "[ERROR] [DML] You have selected a wrong configuration value for the key 'performance_preference'. "
-              "Select from 'default', 'high_performance' or 'minimal_power' \n");
+              "Select from 'default', 'high_performance' or 'minimum_power' \n");
         }
       } else if (key == "disable_metacommands") {
         std::set<std::string> ov_supported_values = {"true", "True", "false", "False"};
@@ -680,11 +686,11 @@ select from 'TF8', 'TF16', 'UINT8', 'FLOAT', 'ITENSOR'. \n)");
           ov_options[key] = value;
         } else if (deprecated_device_types.find(value) != deprecated_device_types.end()) {
           ov_options[key] = value;
-        } else if (value.find("HETERO:") == 0) {
+        } else if (value.find("HETERO") == 0) {
           ov_options[key] = value;
-        } else if (value.find("MULTI:") == 0) {
+        } else if (value.find("MULTI") == 0) {
           ov_options[key] = value;
-        } else if (value.find("AUTO:") == 0) {
+        } else if (value.find("AUTO") == 0) {
           ov_options[key] = value;
         } else {
           ORT_THROW(
@@ -792,6 +798,8 @@ select from 'TF8', 'TF16', 'UINT8', 'FLOAT', 'ITENSOR'. \n)");
         }
       } else if (key == "device_memory_name") {
         device_memory_name_ = std::move(value);
+      } else if (key == "device_luid") {
+        ov_options[key] = value;
       } else {
         ORT_THROW(
             "[ERROR] [OpenVINO] wrong key type entered. Choose from the following runtime key options that are available for OpenVINO."

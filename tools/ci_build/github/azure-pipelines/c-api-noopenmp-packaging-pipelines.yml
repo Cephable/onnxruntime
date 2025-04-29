@@ -54,10 +54,13 @@ parameters:
   displayName: Build flags to append to build command
   type: string
   default: '--use_azure'
+
+# Do not update this to a version that does not exist for the qnn-runtime Maven package:
+# https://mvnrepository.com/artifact/com.qualcomm.qti/qnn-runtime
 - name: QnnSdk
   displayName: QNN SDK Version
   type: string
-  default: 2.32.0.250228
+  default: 2.33.0.250327
 
 resources:
   repositories:
@@ -92,6 +95,8 @@ extends:
         enabled: true
         analyzeTargetGlob: $(Build.ArtifactStagingDirectory)/**.dll
       sourceAnalysisPool: "Onnxruntime-Win-CPU-2022"
+      componentgovernance:
+        ignoreDirectories: $(Build.SourcesDirectory)/onnxruntime-inference-examples
       sourceRepositoriesToScan:
         exclude:
         - repository: onnxruntime-inference-examples
@@ -145,6 +150,29 @@ extends:
         SpecificArtifact: ${{ parameters.SpecificArtifact }}
         BuildId: ${{ parameters.BuildId }}
 
+    - template: stages/nodejs-win-packaging-stage.yml
+      parameters:
+        IsReleaseBuild: ${{ parameters.IsReleaseBuild }}
+        ArtifactName: 'drop-onnxruntime-nodejs-win-x64'
+        StageName: 'Windows_Nodejs_Packaging_x64'
+        BuildCommand: --skip_submodule_sync --build_shared_lib --enable_onnx_tests --enable_wcos --use_telemetry --use_dml --use_webgpu --build_nodejs --cmake_generator "Visual Studio 17 2022"
+        BuildArch: 'x64'
+        EnvSetupScript: 'setup_env.bat'
+        sln_platform: 'x64'
+        DoEsrp: ${{ parameters.DoEsrp }}
+        PublishWebGpuBuildTools: true
+
+    - template: stages/nodejs-win-packaging-stage.yml
+      parameters:
+        IsReleaseBuild: ${{ parameters.IsReleaseBuild }}
+        ArtifactName: 'drop-onnxruntime-nodejs-win-arm64'
+        StageName: 'Windows_Nodejs_Packaging_arm64'
+        BuildCommand: --arm64 --skip_submodule_sync --build_shared_lib --enable_onnx_tests --enable_wcos --use_telemetry --use_dml --use_webgpu --build_nodejs --cmake_generator "Visual Studio 17 2022"
+        BuildArch: 'x64'
+        EnvSetupScript: 'setup_env.bat'
+        sln_platform: 'arm64'
+        DoEsrp: ${{ parameters.DoEsrp }}
+        DependsOnStageName: Windows_Nodejs_Packaging_x64
 
     - template: nuget/templates/dml-vs-2022.yml
       parameters:

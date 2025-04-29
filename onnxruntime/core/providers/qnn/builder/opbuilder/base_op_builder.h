@@ -76,6 +76,10 @@ class BaseOpBuilder : public IOpBuilder {
                                std::vector<std::string>& input_names,
                                bool do_op_validation = false) const ORT_MUST_USE_RESULT;
 
+  Status ProcessInt64Tensors(QnnModelWrapper& qnn_model_wrapper,
+                             const NodeUnit& node_unit,
+                             std::vector<std::string>& input_names) const ORT_MUST_USE_RESULT;
+
   virtual Status ProcessAttributesAndOutputs(QnnModelWrapper& qnn_model_wrapper,
                                              const NodeUnit& node_unit,
                                              std::vector<std::string>&& input_names,
@@ -188,6 +192,7 @@ class BaseOpBuilder : public IOpBuilder {
 
         {"Reshape", QNN_OP_RESHAPE},
         {"Resize", QNN_OP_RESIZE},
+        {"Upsample", QNN_OP_RESIZE},
         {"Flatten", QNN_OP_RESHAPE},
         {"Squeeze", QNN_OP_RESHAPE},
         {"Unsqueeze", QNN_OP_RESHAPE},

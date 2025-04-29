@@ -24,10 +24,17 @@ on:
     branches: [ main, 'rel-*']
   pull_request:
     branches: [ main, 'rel-*']
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
 
 jobs:
   # --- x64 Builds ---
