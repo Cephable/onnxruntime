@@ -120,11 +120,13 @@ Status QnnBackendManager::GetQnnInterfaceProvider(const char* lib_path,
                                                   const char* interface_provider_name,
                                                   void** backend_lib_handle,
                                                   Qnn_Version_t req_version,
-                                                  T** interface_provider) {
+                                                  T** interface_provider,
+                                                  const logging::Logger& logger) {
   std::string error_msg;
   *backend_lib_handle = LoadLib(lib_path,
                                 static_cast<int>(DlOpenFlag::DL_NOW) | static_cast<int>(DlOpenFlag::DL_LOCAL),
-                                error_msg);
+                                error_msg,
+                              logger);
   ORT_RETURN_IF(nullptr == *backend_lib_handle, "Unable to load backend, error: ", error_msg, " ", DlError());
 
   // Get QNN Interface providers
@@ -143,7 +145,7 @@ Status QnnBackendManager::GetQnnInterfaceProvider(const char* lib_path,
   for (size_t pIdx = 0; pIdx < num_providers; pIdx++) {
     Qnn_Version_t interface_version = GetQnnInterfaceApiVersion(interface_providers[pIdx]);
 
-    LOGS_DEFAULT(VERBOSE) << lib_path << " interface version: " << interface_version.major << "."
+    LOGS(logger, VERBOSE) << lib_path << " interface version: " << interface_version.major << "."
                           << interface_version.minor << "." << interface_version.patch;
 
     // Check the interface's API version against the required version.
@@ -185,7 +187,7 @@ void QnnBackendManager::SetQnnBackendType(uint32_t backend_id) {
   }
 }
 
-Status QnnBackendManager::LoadBackend() {
+Status QnnBackendManager::LoadBackend(const logging::Logger& logger) {
   QnnInterface_t* backend_interface_provider{nullptr};
   auto rt = GetQnnInterfaceProvider<QnnInterfaceGetProvidersFn_t,
                                     QnnInterface_t>(backend_path_.c_str(),
@@ -194,14 +196,15 @@ Status QnnBackendManager::LoadBackend() {
                                                     {QNN_API_VERSION_MAJOR,
                                                      QNN_API_VERSION_MINOR,
                                                      QNN_API_VERSION_PATCH},
-                                                    &backend_interface_provider);
+                                                    &backend_interface_provider,
+                                                    logger);
   ORT_RETURN_IF_ERROR(rt);
   qnn_interface_ = backend_interface_provider->QNN_INTERFACE_VER_NAME;
   auto backend_id = backend_interface_provider->backendId;
   SetQnnBackendType(backend_id);
 
   Qnn_Version_t backend_interface_version = GetQnnInterfaceApiVersion(backend_interface_provider);
-  LOGS_DEFAULT(INFO) << "Found valid interface, version: " << backend_interface_version.major
+  LOGS(logger, INFO) << "Found valid interface, version: " << backend_interface_version.major
                      << "." << backend_interface_version.minor << "." << backend_interface_version.patch
                      << " backend provider name: " << backend_interface_provider->providerName
                      << " backend id: " << backend_id;
@@ -215,7 +218,7 @@ Status QnnBackendManager::LoadBackend() {
 //
 // QNN Saver is a "debugging" backend that serializes all QNN API calls (and weights) into local files.
 // This information can be used to debug issues by replaying QNN API calls with another backend.
-Status QnnBackendManager::LoadQnnSaverBackend() {
+Status QnnBackendManager::LoadQnnSaverBackend(const logging::Logger& logger) {
   void* backend_lib_handle = nullptr;
 
   // Helper that unloads the intended backend library handle when the `unload_backend_lib` variable
@@ -238,7 +241,8 @@ Status QnnBackendManager::LoadQnnSaverBackend() {
                                                     {QNN_API_VERSION_MAJOR,
                                                      QNN_API_VERSION_MINOR,
                                                      QNN_API_VERSION_PATCH},
-                                                    &backend_interface_provider);
+                                                    &backend_interface_provider,
+                                                    logger);
   ORT_RETURN_IF_ERROR(rt);
 
   // Set the "intended" backend type so that QNN builders still make the expected QNN API calls.
@@ -254,7 +258,8 @@ Status QnnBackendManager::LoadQnnSaverBackend() {
                                                           {QNN_API_VERSION_MAJOR,
                                                            QNN_API_VERSION_MINOR,
                                                            QNN_API_VERSION_PATCH},
-                                                          &saver_interface_provider);
+                                                          &saver_interface_provider,
+                                                          logger);
   ORT_RETURN_IF_ERROR(saver_rt);
   qnn_interface_ = saver_interface_provider->QNN_INTERFACE_VER_NAME;  // NOTE: QNN Saver will provide the interfaces
 
@@ -273,7 +278,7 @@ Status QnnBackendManager::LoadQnnSaverBackend() {
   return Status::OK();
 }
 
-Status QnnBackendManager::LoadQnnSystemLib() {
+Status QnnBackendManager::LoadQnnSystemLib(const logging::Logger& logger) {
 #ifdef _WIN32
   std::string system_lib_file = "QnnSystem.dll";
 #else
@@ -290,7 +295,8 @@ Status QnnBackendManager::LoadQnnSystemLib() {
                                                           {QNN_SYSTEM_API_VERSION_MAJOR,
                                                            QNN_SYSTEM_API_VERSION_MINOR,
                                                            QNN_SYSTEM_API_VERSION_PATCH},
-                                                          &system_interface_provider);
+                                                          &system_interface_provider,
+                                                          logger);
   ORT_RETURN_IF_ERROR(rt);
   Qnn_Version_t system_interface_version = GetQnnInterfaceApiVersion(system_interface_provider);
   qnn_sys_interface_ = system_interface_provider->QNN_SYSTEM_INTERFACE_VER_NAME;
@@ -905,16 +911,16 @@ Status QnnBackendManager::SetupBackend(const logging::Logger& logger,
 
   Status status = Status::OK();
   if (qnn_saver_path_.empty()) {
-    status = LoadBackend();
+    status = LoadBackend(logger);
   } else {
-    status = LoadQnnSaverBackend();
+    status = LoadQnnSaverBackend(logger);
   }
   if (status.IsOK()) {
     LOGS(logger, VERBOSE) << "LoadBackend succeed.";
   }
 
   if (status.IsOK() && (load_from_cached_context || need_load_system_lib)) {
-    status = LoadQnnSystemLib();
+    status = LoadQnnSystemLib(logger);
   }
 
   if (status.IsOK()) {
@@ -1608,7 +1614,7 @@ QnnBackendManager::~QnnBackendManager() {
   ReleaseResources();
 }
 
-void* QnnBackendManager::LoadLib(const char* file_name, int flags, std::string& error_msg) {
+void* QnnBackendManager::LoadLib(const char* file_name, int flags, std::string& error_msg, const logging::Logger& logger) {
 #ifdef _WIN32
   DWORD as_is, to_be;
   bool loaded_before = false;
@@ -1634,19 +1640,29 @@ void* QnnBackendManager::LoadLib(const char* file_name, int flags, std::string& 
 
   HMODULE mod;
   auto file_path = std::filesystem::path(file_name);
+
+  LOGS(logger, VERBOSE) << "file_name: " << file_name;
+
   if (!file_path.is_absolute()) {
     // construct an absolute path from ORT runtime path + file_name and check whether it exists.
     const Env& env = GetDefaultEnv();
     auto pathstring = env.GetRuntimePath() + ToPathString(file_name);
     auto absolute_path = pathstring.c_str();
+    auto str_abosolute_path = std::filesystem::path(absolute_path).string();
+
     if (std::filesystem::exists(std::filesystem::path(absolute_path))) {
+      LOGS(logger, VERBOSE) << "constructed absolute_path, LoadLibraryExW " << str_abosolute_path;
       // load library from absolute path and search for dependencies there.
       mod = LoadLibraryExW(absolute_path, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
     } else {
+      LOGS(logger, VERBOSE) << "constructed absolute_path doesn't exist, LoadLibraryExA " << file_name;
+
       // use default dll search order for file_name.
       mod = LoadLibraryExA(file_name, nullptr, 0);
     }
   } else {
+    LOGS(logger, VERBOSE) << "absolute_path, LoadLibraryExA " << file_name;
+
     // file_name represents an absolute path.
     // load library from absolute path and search for dependencies there.
     mod = LoadLibraryExA(file_name, nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);

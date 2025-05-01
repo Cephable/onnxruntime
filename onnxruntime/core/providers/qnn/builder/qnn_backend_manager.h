@@ -142,7 +142,7 @@ class QnnBackendManager : public std::enable_shared_from_this<QnnBackendManager>
   Status ParseLoraConfig(std::string lora_config);
 
  private:
-  Status LoadBackend();
+  Status LoadBackend(const logging::Logger& logger);
 
   Status InitializeBackend();
 
@@ -172,11 +172,11 @@ class QnnBackendManager : public std::enable_shared_from_this<QnnBackendManager>
   // NOTE: This function indirectly locks the internal `logger_recursive_mutex_` via nested function calls.
   void ReleaseResources();
 
-  void* LoadLib(const char* file_name, int flags, std::string& error_msg);
+  void* LoadLib(const char* file_name, int flags, std::string& error_msg, const logging::Logger& logger);
 
-  Status LoadQnnSystemLib();
+  Status LoadQnnSystemLib(const logging::Logger& logger);
 
-  Status LoadQnnSaverBackend();
+  Status LoadQnnSaverBackend(const logging::Logger& logger);
 
   Status UnloadLib(void* handle);
 
@@ -197,7 +197,8 @@ class QnnBackendManager : public std::enable_shared_from_this<QnnBackendManager>
                                  const char* interface_provider_name,
                                  void** backend_lib_handle,
                                  Qnn_Version_t req_version,
-                                 T** interface_provider);
+                                 T** interface_provider,
+                                 const logging::Logger& logger);
 
   bool IsDevicePropertySupported();
 

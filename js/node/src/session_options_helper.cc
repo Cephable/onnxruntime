@@ -107,6 +107,22 @@ void ParseExecutionProviders(const Napi::Array epList, Ort::SessionOptions& sess
             ORT_NAPI_THROW_TYPEERROR(epList.Env(), "Invalid argument: enableFp16Precision must be a boolean.");
           }
         }
+
+        Napi::Value profiling_level = obj.Get("profilingLevel");
+        if (!profiling_level.IsUndefined()) {
+          if (profiling_level.IsString()) {
+            qnn_options["profiling_level"] = profiling_level.As<Napi::String>().Utf8Value();
+          } else {
+            ORT_NAPI_THROW_TYPEERROR(epList.Env(), "Invalid argument: profilingLevel must be a string (off, basic, detailed).");
+          }
+        }
+        Napi::Value profiling_file_path = obj.Get("profilingFilePath");
+        if (!profiling_file_path.IsUndefined()) {
+          if (profiling_file_path.IsString()) {
+            qnn_options["profiling_file_path"] = profiling_file_path.As<Napi::String>().Utf8Value();
+          } else {
+            ORT_NAPI_THROW_TYPEERROR(epList.Env(), "Invalid argument: profilingFilePath must be a string.");          }
+        }
       }
 #endif
     }
